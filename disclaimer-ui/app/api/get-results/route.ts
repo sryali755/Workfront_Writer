@@ -15,8 +15,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'WORKFRONT_API_KEY not configured.' }, { status: 500 });
   }
 
+  const fields = encodeURIComponent('name,DE:AI Review Result v2,DE:Differences Found v2');
   const res = await fetch(
-    `${WORKFRONT_BASE}/issue/${issueId}?fields=name,DE:AI_Review_Result,DE:Differences_Found&apiKey=${apiKey}`
+    `${WORKFRONT_BASE}/issue/${issueId}?fields=${fields}&apiKey=${apiKey}`
   );
 
   if (!res.ok) {
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     issueName: data?.name ?? '',
-    aiReviewResult: data?.['DE:AI_Review_Result'] ?? 'No result yet.',
-    differencesFound: data?.['DE:Differences_Found'] ?? 'No differences recorded yet.',
+    aiReviewResult: data?.['DE:AI Review Result v2'] ?? 'No result yet.',
+    differencesFound: data?.['DE:Differences Found v2'] ?? 'No differences recorded yet.',
   });
 }

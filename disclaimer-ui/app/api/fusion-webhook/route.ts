@@ -45,15 +45,16 @@ export async function POST(req: NextRequest) {
     if (!apiKey) {
       return NextResponse.json({ error: 'WORKFRONT_API_KEY not configured.' }, { status: 500 });
     }
+    const fields = encodeURIComponent('DE:Baseline Disclaimer v2,DE:Latest Disclaimer v2');
     const wfRes = await fetch(
-      `${WORKFRONT_BASE}/issue/${issueId}?fields=DE:Baseline_Disclaimer,DE:Latest_Disclaimer&apiKey=${apiKey}`
+      `${WORKFRONT_BASE}/issue/${issueId}?fields=${fields}&apiKey=${apiKey}`
     );
     if (!wfRes.ok) {
       return NextResponse.json({ error: `Workfront fetch failed: ${wfRes.status}` }, { status: wfRes.status });
     }
     const wfData = await wfRes.json();
-    baseline = wfData.data?.['DE:Baseline_Disclaimer'] ?? '';
-    latest   = wfData.data?.['DE:Latest_Disclaimer']   ?? '';
+    baseline = wfData.data?.['DE:Baseline Disclaimer v2'] ?? '';
+    latest   = wfData.data?.['DE:Latest Disclaimer v2']   ?? '';
   }
 
   if (!baseline || !latest) {

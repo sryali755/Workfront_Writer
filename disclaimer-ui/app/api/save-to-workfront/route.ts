@@ -18,8 +18,8 @@ export async function POST(req: NextRequest) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      'DE:AI_Review_Result': aiReviewResult,
-      'DE:Differences_Found': differencesFound ?? 'No differences found.',
+      'DE:AI Review Result v2': aiReviewResult,
+      'DE:Differences Found v2': differencesFound ?? 'No differences found.',
     }),
   });
 
