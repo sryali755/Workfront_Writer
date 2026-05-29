@@ -106,6 +106,35 @@ export async function POST(req: NextRequest) {
         )
         .join('\n\n');
 
+  // Post AI result as a comment on the Workfront issue (Writer AI as named reviewer)
+  if (issueId) {
+    const apiKey = process.env.WORKFRONT_API_KEY;
+    if (apiKey) {
+      const commentLines = [
+        `Writer AI Disclaimer Review — ${result.status === 'MATCH' ? '✅ PASS' : '❌ FAIL'}`,
+        `${result.summary}`,
+      ];
+      if (result.differences.length > 0) {
+        commentLines.push('');
+        result.differences.forEach((d: { type: string; description: string; baseline_text: string; latest_text: string | null }, i: number) => {
+          commentLines.push(`${i + 1}. [${d.type.toUpperCase()}] ${d.description}`);
+          commentLines.push(`   Baseline: "${d.baseline_text}"`);
+          commentLines.push(`   Latest:   "${d.latest_text ?? 'MISSING'}"`);
+        });
+      }
+      await fetch(`${WORKFRONT_BASE}/note?apiKey=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          noteObjCode: 'OPTASK',
+          objID: issueId,
+          noteText: commentLines.join('\n'),
+          subject: `AI Review: ${result.status === 'MATCH' ? 'PASS' : 'FAIL'}`,
+        }),
+      });
+    }
+  }
+
   // Return to Fusion — Fusion's Update Record module maps these back to Workfront
   return NextResponse.json({
     success: true,
