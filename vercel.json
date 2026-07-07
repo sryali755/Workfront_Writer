@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd disclaimer-ui && npm run build",
+  "installCommand": "cd disclaimer-ui && npm install",
+  "outputDirectory": "disclaimer-ui/.next"
+}
