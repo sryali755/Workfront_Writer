@@ -90,6 +90,28 @@ export async function proofhqFetch(
   return res;
 }
 
+// Search for a proof by name.
+// GET /proofs?query[name]={name}
+export async function findProofByName(name: string): Promise<{ id: string; name: string } | null> {
+  const res = await proofhqFetch(`/proofs?query[name]=${encodeURIComponent(name)}`);
+
+  if (!res.ok) {
+    console.error('ProofHQ proof search failed:', res.status);
+    return null;
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!data?.data || data.data.length === 0) {
+    return null;
+  }
+
+  const proof = data.data[0];
+  return {
+    id: proof.id,
+    name: proof.name,
+  };
+}
+
 // Post a comment onto a proof.
 // POST /proofs/{proofToken}/comments  body: { text, ...optional }
 export async function postProofComment(

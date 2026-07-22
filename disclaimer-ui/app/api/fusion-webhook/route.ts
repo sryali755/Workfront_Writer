@@ -5,7 +5,7 @@ export const config = {
 };
 
 export const runtime = 'nodejs';
-import { postProofComment } from '../../lib/proofhq';
+import { postProofComment, findProofByName } from '../../lib/proofhq';
 import { getProofTextByDocumentId } from '../../lib/get-proof-text';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
@@ -426,8 +426,32 @@ export async function POST(req: NextRequest) {
       result ??
       unableToReviewResult('No readable proof text was provided to the Editorial Cold Read webhook.');
     const reviewComment = buildColdReadComment(coldReadResult, documentName);
-    const proofHqResult: { posted: boolean; status?: number; error?: string } = { posted: false };
+    const proofHqResult: { posted: boolean; status?: number; error?: string; proofName?: string } = { posted: false };
 
+    // Try to post to ProofHQ by matching document name to proof name
+    if (documentName && !proofToken) {
+      try {
+        console.log('Searching ProofHQ for proof by name:', documentName);
+        const proof = await findProofByName(documentName);
+        if (proof) {
+          console.log('Found proof in ProofHQ:', proof.id, proof.name);
+          proofHqResult.proofName = proof.name;
+          const posted = await postProofComment(proof.id, reviewComment);
+          proofHqResult.posted = posted.ok;
+          proofHqResult.status = posted.status;
+          if (!posted.ok) {
+            proofHqResult.error = 'ProofHQ comment POST failed.';
+          }
+        } else {
+          console.log('No proof found in ProofHQ matching name:', documentName);
+          proofHqResult.error = `No proof found in ProofHQ with name: ${documentName}`;
+        }
+      } catch (err) {
+        proofHqResult.error = err instanceof Error ? err.message : 'ProofHQ request failed.';
+      }
+    }
+
+    // If proofToken was provided directly, use it
     if (proofToken) {
       try {
         const posted = await postProofComment(proofToken, reviewComment);
