@@ -302,7 +302,26 @@ function unableToReviewResult(reason: string): ColdReadResult {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as WebhookRequest;
+    let body: WebhookRequest;
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      const pdfFileBlob = formData.get('pdfFile') as Blob | null;
+      body = {
+        documentId: formData.get('documentId') as string,
+        documentName: formData.get('documentName') as string,
+        projectId: formData.get('projectId') as string,
+        proofToken: (formData.get('proofToken') as string) || '',
+      };
+      if (pdfFileBlob) {
+        const buffer = Buffer.from(await pdfFileBlob.arrayBuffer());
+        const text = await extractPdfText(buffer);
+        body.proofText = text;
+      }
+    } else {
+      body = await req.json() as WebhookRequest;
+    }
 
     // DEBUG: Log what we received
     console.log('Webhook received:', {
