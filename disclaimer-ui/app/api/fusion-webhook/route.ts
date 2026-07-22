@@ -43,6 +43,7 @@ type WebhookRequest = {
   proofToken?: string;
   proofText?: string;
   pdfFile?: string; // base64-encoded PDF
+  pdfDownloadUrl?: string; // URL to download PDF from
 };
 
 type WorkfrontDocument = {
@@ -340,7 +341,18 @@ export async function POST(req: NextRequest) {
 
     let result: ColdReadResult | undefined;
 
-    // If no proofText in request, try to look it up by documentId
+    // If no proofText in request, try to download and extract from URL
+    if (!isUsableProofText(proofText, documentName) && body.pdfDownloadUrl) {
+      try {
+        const pdfBuffer = await downloadWorkfrontDocument(body.pdfDownloadUrl);
+        proofText = await extractPdfText(pdfBuffer);
+        proofTextSource = 'pdf-download-url';
+      } catch (err) {
+        console.error('Failed to download/extract PDF from URL:', err);
+      }
+    }
+
+    // Fallback: try to look it up by documentId in mapping
     if (!isUsableProofText(proofText, documentName) && documentId) {
       const mapping = getProofTextByDocumentId(documentId);
       if (mapping) {
