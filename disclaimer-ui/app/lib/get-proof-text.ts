@@ -1,10 +1,5 @@
 import mappingData from './document-proof-mapping.json';
 
-export function getProofTextByDocumentId(documentId: string): { proofText: string; proofToken: string } | null {
-  const mapping = (mappingData.mappings as any[]).find((m) => m.documentId === documentId);
-  return mapping ? { proofText: mapping.proofText, proofToken: mapping.proofToken } : null;
-}
-
 export function getProofIdByDocumentName(documentName: string): string | null {
   const mapping = (mappingData.mappings as any[]).find((m) => m.documentName === documentName);
   return mapping?.proofId || null;
