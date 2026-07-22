@@ -119,11 +119,15 @@ export async function postProofComment(
   text: string,
   extra: Record<string, unknown> = {}
 ): Promise<{ ok: boolean; status: number; body: unknown }> {
-  const res = await proofhqFetch(`/proofs/${encodeURIComponent(proofToken)}/comments`, {
+  const path = `/proofs/${encodeURIComponent(proofToken)}/comments`;
+  console.log('Posting to ProofHQ:', { path, proofToken });
+
+  const res = await proofhqFetch(path, {
     method: 'POST',
     body: JSON.stringify({ text, ...extra }),
   });
 
   const body = await res.json().catch(() => null);
+  console.log('ProofHQ response:', { status: res.status, ok: res.ok, body: JSON.stringify(body).substring(0, 200) });
   return { ok: res.ok, status: res.status, body };
 }
