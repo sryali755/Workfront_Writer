@@ -1,7 +1,8 @@
 // ProofHQ file upload helper
 // Uploads a PDF to ProofHQ and returns the proof token
 
-import FormData from 'form-data';
+// @ts-ignore - form-data doesn't have perfect TypeScript support in Node.js
+const FormData = require('form-data');
 
 export async function uploadPdfToProofHQ(
   pdfBuffer: Buffer,
