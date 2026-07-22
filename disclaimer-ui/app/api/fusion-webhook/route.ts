@@ -316,6 +316,10 @@ export async function POST(req: NextRequest) {
         proofToken: (formData.get('proofToken') as string) || '',
       };
       if (pdfFileBlob) {
+        const fileSize = pdfFileBlob.size;
+        if (fileSize > 1024 * 1024 * 1024) {
+          throw new Error(`File size ${(fileSize / (1024 * 1024 * 1024)).toFixed(2)}GB exceeds 1GB limit.`);
+        }
         const buffer = Buffer.from(await pdfFileBlob.arrayBuffer());
         const text = await extractPdfText(buffer);
         body.proofText = text;
