@@ -6,8 +6,7 @@ export const config = {
 
 export const runtime = 'nodejs';
 import { postProofComment, findProofByName } from '../../lib/proofhq';
-import { getProofTextByDocumentId } from '../../lib/get-proof-text';
-import mappingData from '../../lib/document-proof-mapping.json';
+import { getProofTextByDocumentId, getProofIdByDocumentName } from '../../lib/get-proof-text';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
 const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com';
@@ -432,11 +431,11 @@ export async function POST(req: NextRequest) {
     // Try to post to ProofHQ using document name mapping
     if (documentName && !proofToken) {
       try {
-        const mapping = mappingData.mappings.find((m) => m.documentName === documentName);
-        if (mapping && mapping.proofId) {
-          console.log('Found proof mapping:', { documentName, proofId: mapping.proofId });
-          proofHqResult.proofId = mapping.proofId;
-          const posted = await postProofComment(mapping.proofId, reviewComment);
+        const proofId = getProofIdByDocumentName(documentName);
+        if (proofId) {
+          console.log('Found proof mapping:', { documentName, proofId });
+          proofHqResult.proofId = proofId;
+          const posted = await postProofComment(proofId, reviewComment);
           proofHqResult.posted = posted.ok;
           proofHqResult.status = posted.status;
           if (!posted.ok) {
