@@ -161,15 +161,20 @@ async function getWorkfrontDocument(documentId: string): Promise<WorkfrontDocume
   const fields = encodeURIComponent(
     'ID,name,downloadURL,currentVersion:ext,currentVersion:fileName'
   );
-  const res = await fetch(
-    `${WORKFRONT_API_BASE}/document/${encodeURIComponent(documentId)}?fields=${fields}&apiKey=${apiKey}`
-  );
+  const url = `${WORKFRONT_API_BASE}/document/${encodeURIComponent(documentId)}?fields=${fields}&apiKey=${apiKey}`;
+  console.log('Fetching Workfront document:', { documentId, url });
+
+  const res = await fetch(url);
 
   if (!res.ok) {
-    throw new Error(`Workfront document fetch failed: ${res.status}`);
+    const text = await res.text();
+    console.error('Workfront API error:', { status: res.status, documentId, text: text.substring(0, 200) });
+    throw new Error(`Workfront document fetch failed: ${res.status} ${text.substring(0, 100)}`);
   }
 
   const data = await res.json();
+  console.log('Workfront document fetched:', { documentId, hasDownloadURL: !!data?.data?.downloadURL });
+
   if (!data?.data?.downloadURL) {
     throw new Error('Workfront document fetch returned no downloadURL.');
   }
