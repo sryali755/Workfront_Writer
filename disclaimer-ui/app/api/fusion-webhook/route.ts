@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { uploadPdfToProofHQ } from '../../lib/proofhq-upload';
+import { postProofComment } from '../../lib/proofhq';
 
 export const config = {
   maxDuration: 300,
@@ -338,6 +340,10 @@ export async function POST(req: NextRequest) {
     }
 
     // DEBUG: Log what we received
+    console.log('=== WEBHOOK RECEIVED ===');
+    console.log('All Keys:', Object.keys(body));
+    console.log('Full Payload:', JSON.stringify(body, null, 2).substring(0, 1000));
+    console.log('proofToken value:', body.proofToken || 'NOT PRESENT');
     console.log('Webhook received:', {
       documentId: body.documentId,
       documentName: body.documentName,
@@ -347,6 +353,7 @@ export async function POST(req: NextRequest) {
       proofText: body.proofText?.substring?.(0, 100),
       allKeys: Object.keys(body),
     });
+    console.log('=== END WEBHOOK LOG ===');
 
     let documentName = body.documentName;
     const documentId = body.documentId;
@@ -419,6 +426,58 @@ export async function POST(req: NextRequest) {
       unableToReviewResult('No readable proof text was provided to the Editorial Cold Read webhook.');
     const reviewComment = buildColdReadComment(coldReadResult, documentName);
 
+    // Try to upload PDF to ProofHQ and post comment
+    let proofCommentResult: { success: boolean; proofToken?: string; error?: string } = {
+      success: false,
+    };
+
+    if (body.pdfFile || body.pdfDownloadUrl) {
+      try {
+        // Get PDF buffer
+        let pdfBuffer: Buffer | undefined;
+
+        if (body.pdfFile) {
+          pdfBuffer = Buffer.from(body.pdfFile, 'base64');
+        } else if (body.pdfDownloadUrl) {
+          const pdfRes = await fetch(body.pdfDownloadUrl);
+          if (pdfRes.ok) {
+            pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+          }
+        }
+
+        if (pdfBuffer) {
+          console.log('Uploading PDF to ProofHQ...');
+          const uploadResult = await uploadPdfToProofHQ(pdfBuffer, documentName || 'document.pdf', {
+            name: documentName,
+            message: 'Editorial Cold Read',
+          });
+
+          if (uploadResult.ok && uploadResult.proofToken) {
+            console.log('✓ PDF uploaded to ProofHQ, posting comment...');
+            const commentResult = await postProofComment(uploadResult.proofToken, reviewComment);
+
+            proofCommentResult = {
+              success: commentResult.ok,
+              proofToken: uploadResult.proofToken,
+              error: commentResult.ok ? undefined : `Comment post failed: ${commentResult.status}`,
+            };
+
+            if (commentResult.ok) {
+              console.log('✓ Comment posted to ProofHQ');
+            } else {
+              console.error('✗ Failed to post comment to ProofHQ:', commentResult.status);
+            }
+          } else {
+            proofCommentResult.error = uploadResult.error || 'Upload failed';
+            console.error('✗ Failed to upload PDF to ProofHQ:', uploadResult.error);
+          }
+        }
+      } catch (err) {
+        proofCommentResult.error = err instanceof Error ? err.message : 'ProofHQ error';
+        console.error('ProofHQ integration error:', proofCommentResult.error);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       documentId,
@@ -426,6 +485,7 @@ export async function POST(req: NextRequest) {
       proofTextSource: proofTextSource || undefined,
       coldRead: coldReadResult,
       comment: reviewComment,
+      proofHQ: proofCommentResult,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Editorial Cold Read webhook failed.';
