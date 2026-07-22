@@ -1,8 +1,7 @@
 // ProofHQ file upload helper
 // Uploads a PDF to ProofHQ and returns the proof token
 
-// @ts-ignore - form-data doesn't have perfect TypeScript support in Node.js
-const FormData = require('form-data');
+import { https } from 'https';
 
 export async function uploadPdfToProofHQ(
   pdfBuffer: Buffer,
@@ -21,10 +20,15 @@ export async function uploadPdfToProofHQ(
       return { ok: false, error: 'Failed to authenticate with ProofHQ' };
     }
 
-    // Create FormData for multipart upload (Node.js version)
+    // Use form-data for multipart upload
+    // @ts-ignore
+    const FormData = require('form-data');
     const formData = new FormData();
-    formData.append('file', pdfBuffer, { filename: fileName });
 
+    // Append file as buffer with filename
+    formData.append('file', pdfBuffer, fileName);
+
+    // Add optional parameters
     if (options.name) {
       formData.append('name', options.name);
     }
@@ -36,35 +40,61 @@ export async function uploadPdfToProofHQ(
       ? 'https://api-eu.proofhq.com/api/v1'
       : 'https://rest.proofhq.com/api/v1';
 
-    const uploadRes = await fetch(`${baseUrl}/upload`, {
-      method: 'POST',
-      headers: {
-        ...formData.getHeaders(),
-        sessionId,
-      },
-      body: formData as any,
+    console.log('Sending multipart upload to ProofHQ');
+
+    // Use fetch with proper error handling
+    const uploadRes = await new Promise<Response>((resolve, reject) => {
+      fetch(`${baseUrl}/upload`, {
+        method: 'POST',
+        headers: {
+          ...formData.getHeaders(),
+          'sessionId': sessionId,
+        },
+        body: formData as any,
+      })
+        .then(resolve)
+        .catch(reject);
     });
 
+    const responseText = await uploadRes.text();
+    console.log('ProofHQ upload response status:', uploadRes.status);
+    console.log('ProofHQ upload response:', responseText.substring(0, 300));
+
     if (!uploadRes.ok) {
-      const errorText = await uploadRes.text();
-      console.error('ProofHQ upload failed:', { status: uploadRes.status, error: errorText });
+      console.error('ProofHQ upload failed:', { status: uploadRes.status });
       return { ok: false, error: `Upload failed: ${uploadRes.status}` };
     }
 
-    const uploadData = await uploadRes.json();
-    console.log('ProofHQ upload response:', JSON.stringify(uploadData).substring(0, 300));
+    let uploadData;
+    try {
+      uploadData = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error('Failed to parse ProofHQ response');
+      return { ok: false, error: 'Invalid response format from ProofHQ' };
+    }
 
-    // The response should contain proof data
-    const proofToken = uploadData?.data?.token || uploadData?.token;
-    const proofId = uploadData?.data?.id || uploadData?.id;
+    // The response is an array of uploaded files
+    // ProofHQ returns [{ token, warning, error, ... }]
+    let proofToken: string | undefined;
+
+    if (Array.isArray(uploadData) && uploadData.length > 0) {
+      const uploadInfo = uploadData[0];
+      proofToken = uploadInfo.token;
+      if (uploadInfo.error) {
+        console.error('ProofHQ upload error:', uploadInfo.error);
+        return { ok: false, error: uploadInfo.error };
+      }
+    } else if (uploadData?.token) {
+      proofToken = uploadData.token;
+    }
 
     if (!proofToken) {
-      console.error('No token in upload response:', uploadData);
+      console.error('No token in upload response');
       return { ok: false, error: 'No proof token returned from ProofHQ' };
     }
 
-    console.log('✓ PDF uploaded to ProofHQ:', { proofToken, proofId });
-    return { ok: true, proofToken, proofId };
+    console.log('✓ PDF uploaded to ProofHQ, token:', proofToken.substring(0, 10) + '...');
+    return { ok: true, proofToken };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Upload error';
     console.error('ProofHQ upload error:', message);
