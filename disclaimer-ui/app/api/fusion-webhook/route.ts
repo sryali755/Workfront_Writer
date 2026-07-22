@@ -5,8 +5,8 @@ export const config = {
 };
 
 export const runtime = 'nodejs';
-import { postProofComment, findProofByName } from '../../lib/proofhq';
-import { getProofTextByDocumentId, getProofIdByDocumentName } from '../../lib/get-proof-text';
+import { postProofComment } from '../../lib/proofhq';
+import { getProofIdByDocumentName } from '../../lib/get-proof-text';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
 const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com';
