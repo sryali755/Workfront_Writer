@@ -2,6 +2,7 @@
 const mappingData = require('./document-proof-mapping.json') as any;
 
 export function getProofIdByDocumentName(documentName: string): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapping = mappingData.mappings.find((m: any) => m.documentName === documentName);
   return mapping?.proofId || null;
 }
