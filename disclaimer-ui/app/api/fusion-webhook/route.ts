@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+export const config = {
+  maxDuration: 300,
+};
+
+export const runtime = 'nodejs';
 import { postProofComment } from '../../lib/proofhq';
 import { getProofTextByDocumentId } from '../../lib/get-proof-text';
 
