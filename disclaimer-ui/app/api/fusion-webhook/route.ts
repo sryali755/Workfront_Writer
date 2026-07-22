@@ -338,9 +338,11 @@ export async function POST(req: NextRequest) {
     console.log('Webhook received:', {
       documentId: body.documentId,
       documentName: body.documentName,
+      projectId: body.projectId,
       pdfFilePresent: !!body.pdfFile,
       pdfFileLength: body.pdfFile?.length,
       proofText: body.proofText?.substring?.(0, 100),
+      allKeys: Object.keys(body),
     });
 
     let documentName = body.documentName;
