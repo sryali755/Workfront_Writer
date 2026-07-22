@@ -1,7 +1,8 @@
-import mappingData from './document-proof-mapping.json';
+// Use 'any' to avoid strict type checking on the JSON mapping
+const mappingData = require('./document-proof-mapping.json') as any;
 
 export function getProofIdByDocumentName(documentName: string): string | null {
-  const mapping = (mappingData.mappings as any[]).find((m) => m.documentName === documentName);
+  const mapping = mappingData.mappings.find((m: any) => m.documentName === documentName);
   return mapping?.proofId || null;
 }
 
