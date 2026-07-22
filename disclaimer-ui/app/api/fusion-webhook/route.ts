@@ -1,145 +1,415 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { postProofComment } from '../../lib/proofhq';
+import { getProofTextByDocumentId } from '../../lib/get-proof-text';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
-const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com/attask/api/v17.0';
+const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com';
+const WORKFRONT_API_BASE = `${WORKFRONT_BASE}/attask/api/v17.0`;
 
-const SYSTEM_PROMPT = `You are a legal disclaimer quality control assistant for an editorial team.
+type Finding = {
+  findingNumber: number;
+  pageNumber: string;
+  category: 'Brand Guideline Compliance' | 'Product Naming' | 'Spelling and Typographical Errors' | 'Language Sense';
+  severity: 'Critical' | 'Major' | 'Minor' | 'Suggestion';
+  issue: string;
+  recommendedRevision: string;
+  reason: string;
+  confidence: 'High' | 'Medium' | 'Low';
+};
 
-Your ONLY job is to compare two disclaimer texts and identify differences.
+type ColdReadResult = {
+  summary: {
+    reviewType: 'Cold Read';
+    overallStatus: string;
+    totalFindings: number;
+    critical: number;
+    major: number;
+    minor: number;
+    suggestions: number;
+  };
+  findings: Finding[];
+  workfrontComments: Array<{
+    pageNumber: string;
+    severity: Finding['severity'];
+    comment: string;
+  }>;
+  overallAssessment: string;
+};
 
-Rules:
-- Do NOT rewrite or suggest new disclaimer language
-- Do NOT make legal judgments
-- ONLY identify what changed between the baseline and the latest version
-- Be precise: flag missing words, changed words, punctuation changes, removed sentences
+type WebhookRequest = {
+  documentId?: string;
+  documentName?: string;
+  projectId?: string;
+  proofToken?: string;
+  proofText?: string;
+  pdfFile?: string; // base64-encoded PDF
+};
 
-Output format (always return valid JSON):
+type WorkfrontDocument = {
+  ID: string;
+  name?: string;
+  downloadURL?: string;
+  currentVersion?: {
+    ext?: string;
+    fileName?: string;
+  };
+};
+
+const SYSTEM_PROMPT = `You are an expert Xfinity Editorial Copy Editor.
+
+Always use the Editorial Read Documentation and Copy Editing & Proofreading Workflow as the governing methodology.
+
+Review ONLY the uploaded proof text supplied in the user message.
+Perform ONLY a Cold Read.
+
+Do not perform:
+- Word-for-Word Read
+- Check Changes
+- Version comparison
+- Backup comparison
+- Creative review
+- Marketing review
+- Copywriting improvements
+
+Evaluate only:
+- Brand Guideline Compliance
+- Product Naming
+- Spelling and Typographical Errors
+- Language Sense (grammar, clarity, readability)
+
+Report only issues that are directly observable in the proof text.
+Never invent issues.
+Never guess missing or truncated content.
+Never rewrite marketing copy.
+Ignore reviewer comments, browser UI, metadata, ProofHQ interface elements, timestamps, filenames, and OCR artifacts.
+Do not report spelling, capitalization, or grammar issues within logos, trademarks, licensed artwork, or supplied creative assets unless the proof explicitly indicates the text is editable marketing copy.
+
+If an issue cannot be confirmed from the visible proof, use this recommendation exactly:
+"Verify against the approved backup/source document."
+
+Methodology:
+- A Cold Read means no reference material or backup is used for comparison.
+- Cold Read checks are limited to brand guidelines, product naming, spelling/typos, and language sense.
+- Findings must be specific, directly observable, and actionable.
+- If there are no directly observable issues, return zero findings and mark the proof Ready to proceed.
+
+Return valid JSON only with this shape:
 {
-  "status": "MATCH" or "MISMATCH",
-  "summary": "One sentence summary of findings",
-  "differences": [
+  "summary": {
+    "reviewType": "Cold Read",
+    "overallStatus": "Ready to proceed" | "Requires revision" | "Unable to Review",
+    "totalFindings": 0,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "suggestions": 0
+  },
+  "findings": [
     {
-      "type": "changed" | "missing" | "added" | "punctuation",
-      "baseline_text": "exact text from baseline",
-      "latest_text": "exact text from latest (or null if missing)",
-      "description": "plain English description of the issue"
+      "findingNumber": 1,
+      "pageNumber": "Page 1",
+      "category": "Brand Guideline Compliance" | "Product Naming" | "Spelling and Typographical Errors" | "Language Sense",
+      "severity": "Critical" | "Major" | "Minor" | "Suggestion",
+      "issue": "Directly observable issue.",
+      "recommendedRevision": "Concise correction or Verify against the approved backup/source document.",
+      "reason": "Why this matters under the Cold Read methodology.",
+      "confidence": "High" | "Medium" | "Low"
     }
-  ]
+  ],
+  "workfrontComments": [
+    {
+      "pageNumber": "Page 1",
+      "severity": "Minor",
+      "comment": "Production-ready Workfront comment."
+    }
+  ],
+  "overallAssessment": "Concise assessment of editorial quality and whether the proof is ready to proceed or requires revision."
 }`;
 
-// Called by Fusion's HTTP module.
-// Fusion sends: { ID, baseline, latest }  (fields extracted from the Watch Event payload)
-// If baseline/latest are missing, we fetch them from Workfront using the ID.
-// Returns: { aiReviewResult, differencesFound }
-// Fusion's Update Record module maps these two fields back into Workfront.
-export async function POST(req: NextRequest) {
-  const body = await req.json();
+function textFromBody(body: Record<string, unknown>): string {
+  const candidates = [
+    body.proofText,
+    body.documentText,
+    body.extractedText,
+    body.text,
+  ];
 
-  let baseline: string = body.baseline ?? body['DE:Baseline_Disclaimer'] ?? '';
-  let latest: string   = body.latest   ?? body['DE:Latest_Disclaimer']   ?? '';
-  const issueId: string = body.ID ?? body.issueId ?? '';
+  const text = candidates.find((value) => typeof value === 'string' && value.trim());
+  return typeof text === 'string' ? text.trim() : '';
+}
 
-  // Fallback: fetch fields from Workfront if not provided in the payload
-  if ((!baseline || !latest) && issueId) {
-    const apiKey = process.env.WORKFRONT_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: 'WORKFRONT_API_KEY not configured.' }, { status: 500 });
-    }
-    const fields = encodeURIComponent('DE:Baseline Disclaimer v2,DE:Latest Disclaimer v2');
-    const wfRes = await fetch(
-      `${WORKFRONT_BASE}/issue/${issueId}?fields=${fields}&apiKey=${apiKey}`
-    );
-    if (!wfRes.ok) {
-      return NextResponse.json({ error: `Workfront fetch failed: ${wfRes.status}` }, { status: wfRes.status });
-    }
-    const wfData = await wfRes.json();
-    baseline = wfData.data?.['DE:Baseline Disclaimer v2'] ?? '';
-    latest   = wfData.data?.['DE:Latest Disclaimer v2']   ?? '';
+function isUsableProofText(proofText: string, documentName?: string): boolean {
+  if (!proofText) return false;
+  if (documentName && proofText.trim() === documentName.trim()) return false;
+  if (proofText.trim().length < 80) return false;
+  return true;
+}
+
+async function getWorkfrontDocument(documentId: string): Promise<WorkfrontDocument> {
+  const apiKey = process.env.WORKFRONT_API_KEY;
+  if (!apiKey) {
+    throw new Error('WORKFRONT_API_KEY is not configured.');
   }
 
-  if (!baseline || !latest) {
-    return NextResponse.json(
-      { error: 'Missing baseline or latest disclaimer. Send them in the body or provide a valid issue ID.' },
-      { status: 400 }
+  const fields = encodeURIComponent(
+    'ID,name,downloadURL,currentVersion:ext,currentVersion:fileName'
+  );
+  const res = await fetch(
+    `${WORKFRONT_API_BASE}/document/${encodeURIComponent(documentId)}?fields=${fields}&apiKey=${apiKey}`
+  );
+
+  if (!res.ok) {
+    throw new Error(`Workfront document fetch failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  if (!data?.data?.downloadURL) {
+    throw new Error('Workfront document fetch returned no downloadURL.');
+  }
+
+  return data.data;
+}
+
+async function downloadWorkfrontDocument(downloadURL: string): Promise<Buffer> {
+  const apiKey = process.env.WORKFRONT_API_KEY;
+  if (!apiKey) {
+    throw new Error('WORKFRONT_API_KEY is not configured.');
+  }
+
+  let fullUrl = downloadURL;
+  if (!downloadURL.startsWith('http')) {
+    fullUrl = `${WORKFRONT_BASE}${downloadURL}`;
+  }
+
+  const url = new URL(fullUrl);
+  url.searchParams.set('apiKey', apiKey);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    throw new Error(`Workfront document download failed: ${res.status} ${res.statusText}`);
+  }
+
+  const contentType = res.headers.get('content-type') ?? '';
+  if (contentType.includes('text/html')) {
+    const text = await res.text();
+    throw new Error(
+      `Workfront document download returned HTML instead of PDF. Status: ${res.status}. Response: ${text.substring(0, 200)}`
     );
   }
 
-  // Call Writer AI
-  const writerRes = await fetch(WRITER_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.WRITER_API_KEY}`,
-      'Content-Type': 'application/json',
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const pdfParseModule = (await import('pdf-parse/lib/pdf-parse')) as unknown;
+  const pdfParse =
+    typeof pdfParseModule === 'function'
+      ? pdfParseModule
+      : (pdfParseModule as { default: (data: Buffer) => Promise<{ text: string }> }).default;
+  const result = await pdfParse(buffer);
+  return result.text.trim();
+}
+
+async function fetchProofTextFromWorkfront(documentId: string): Promise<{
+  text: string;
+  documentName?: string;
+  source: string;
+}> {
+  const document = await getWorkfrontDocument(documentId);
+  const ext = document.currentVersion?.ext?.toLowerCase();
+
+  if (ext && ext !== 'pdf') {
+    throw new Error(`Unsupported Workfront document type for text extraction: ${ext}`);
+  }
+
+  const file = await downloadWorkfrontDocument(document.downloadURL ?? '');
+  const text = await extractPdfText(file);
+
+  return {
+    text,
+    documentName: document.name ?? document.currentVersion?.fileName,
+    source: 'workfront-download',
+  };
+}
+
+function buildColdReadComment(result: ColdReadResult, documentName?: string) {
+  const lines = [
+    'Editorial Cold Read Report',
+    documentName ? `Proof: ${documentName}` : '',
+    '',
+    'Output 1 - Editorial Cold Read Summary',
+    `Review Type: ${result.summary.reviewType}`,
+    `Overall Status: ${result.summary.overallStatus}`,
+    `Total Findings: ${result.summary.totalFindings}`,
+    `Critical: ${result.summary.critical}`,
+    `Major: ${result.summary.major}`,
+    `Minor: ${result.summary.minor}`,
+    `Suggestions: ${result.summary.suggestions}`,
+    '',
+    'Output 2 - Editorial Findings',
+  ].filter(Boolean);
+
+  if (result.findings.length === 0) {
+    lines.push('No directly observable editorial issues found.');
+  } else {
+    result.findings.forEach((finding) => {
+      lines.push(
+        `${finding.findingNumber}. ${finding.pageNumber} | ${finding.category} | ${finding.severity}`,
+        `Issue: ${finding.issue}`,
+        `Recommended Revision: ${finding.recommendedRevision}`,
+        `Reason: ${finding.reason}`,
+        `Confidence: ${finding.confidence}`,
+        ''
+      );
+    });
+  }
+
+  lines.push('Output 3 - Workfront Editorial Comments');
+  if (result.workfrontComments.length === 0) {
+    lines.push('No Workfront comments required.');
+  } else {
+    result.workfrontComments.forEach((comment, index) => {
+      lines.push(`${index + 1}. ${comment.pageNumber} | ${comment.severity}: ${comment.comment}`);
+    });
+  }
+
+  lines.push('', 'Output 4 - Overall Assessment', result.overallAssessment);
+  return lines.join('\n');
+}
+
+function unableToReviewResult(reason: string): ColdReadResult {
+  return {
+    summary: {
+      reviewType: 'Cold Read',
+      overallStatus: 'Unable to Review',
+      totalFindings: 0,
+      critical: 0,
+      major: 0,
+      minor: 0,
+      suggestions: 0,
     },
-    body: JSON.stringify({
-      model: 'palmyra-x-004',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Compare these two disclaimer versions and return JSON only.\n\nBASELINE (approved version):\n${baseline}\n\nLATEST (version to check):\n${latest}`
-        }
-      ],
-      temperature: 0,
-      response_format: { type: 'json_object' }
-    })
-  });
+    findings: [],
+    workfrontComments: [
+      {
+        pageNumber: 'N/A',
+        severity: 'Major',
+        comment: `${reason} Verify against the approved backup/source document.`,
+      },
+    ],
+    overallAssessment: `${reason} Verify against the approved backup/source document.`,
+  };
+}
 
-  if (!writerRes.ok) {
-    const err = await writerRes.text();
-    return NextResponse.json({ error: `Writer API error: ${err}` }, { status: writerRes.status });
-  }
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json() as WebhookRequest;
 
-  const writerData = await writerRes.json();
-  const result = JSON.parse(writerData.choices[0].message.content);
+    // DEBUG: Log what we received
+    console.log('Webhook received:', {
+      documentId: body.documentId,
+      documentName: body.documentName,
+      pdfFilePresent: !!body.pdfFile,
+      pdfFileLength: body.pdfFile?.length,
+      proofText: body.proofText?.substring?.(0, 100),
+    });
 
-  // Format into strings that Fusion maps directly into Workfront Update Record fields
-  const aiReviewResult = result.status === 'MATCH'
-    ? `PASS — ${result.summary}`
-    : `FAIL — ${result.summary}`;
+    let documentName = body.documentName;
+    const documentId = body.documentId;
+    const proofToken = body.proofToken || body.proofToken || '';
+    let proofText = textFromBody(body);
+    let proofTextSource = proofText ? 'request-body' : '';
 
-  const differencesFound = result.differences.length === 0
-    ? 'No differences found.'
-    : result.differences
-        .map((d: { type: string; description: string; baseline_text: string; latest_text: string | null }, i: number) =>
-          `${i + 1}. [${d.type.toUpperCase()}] ${d.description}\n   Baseline: "${d.baseline_text}"\n   Latest:   "${d.latest_text ?? 'MISSING'}"`
-        )
-        .join('\n\n');
+    let result: ColdReadResult | undefined;
 
-  // Post AI result as a comment on the Workfront issue (Writer AI as named reviewer)
-  if (issueId) {
-    const apiKey = process.env.WORKFRONT_API_KEY;
-    if (apiKey) {
-      const commentLines = [
-        `Writer AI Disclaimer Review — ${result.status === 'MATCH' ? '✅ PASS' : '❌ FAIL'}`,
-        `${result.summary}`,
-      ];
-      if (result.differences.length > 0) {
-        commentLines.push('');
-        result.differences.forEach((d: { type: string; description: string; baseline_text: string; latest_text: string | null }, i: number) => {
-          commentLines.push(`${i + 1}. [${d.type.toUpperCase()}] ${d.description}`);
-          commentLines.push(`   Baseline: "${d.baseline_text}"`);
-          commentLines.push(`   Latest:   "${d.latest_text ?? 'MISSING'}"`);
-        });
+    // If no proofText in request, try to look it up by documentId
+    if (!isUsableProofText(proofText, documentName) && documentId) {
+      const mapping = getProofTextByDocumentId(documentId);
+      if (mapping) {
+        proofText = mapping.proofText;
+        proofTextSource = 'mapping-database';
       }
-      await fetch(`${WORKFRONT_BASE}/note?apiKey=${apiKey}`, {
+    }
+
+    if (!isUsableProofText(proofText, documentName)) {
+      // If documentId looks like it wasn't mapped properly in Fusion
+      if (documentId?.includes?.('newState')) {
+        result = unableToReviewResult(
+          `ERROR: documentId in Fusion is not mapped correctly. It received the literal text "${documentId}" instead of an actual ID. Please fix the Fusion HTTP module mapping.`
+        );
+      } else if (documentId) {
+        result = unableToReviewResult(
+          `No proof text found for document ${documentId}. Add it to the mapping file at app/lib/document-proof-mapping.json`
+        );
+      } else {
+        result = unableToReviewResult('No documentId provided and no proofText in request.');
+      }
+    } else if (!result) {
+      const writerRes = await fetch(WRITER_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${process.env.WRITER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          noteObjCode: 'OPTASK',
-          objID: issueId,
-          noteText: commentLines.join('\n'),
-          subject: `AI Review: ${result.status === 'MATCH' ? 'PASS' : 'FAIL'}`,
+          model: 'palmyra-x-004',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: `Perform an Editorial Cold Read of the uploaded proof text below. Preserve page references when provided. Return JSON only.\n\nUPLOADED PROOF TEXT:\n${proofText}`,
+            },
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' },
         }),
       });
-    }
-  }
 
-  // Return to Fusion — Fusion's Update Record module maps these back to Workfront
-  return NextResponse.json({
-    success: true,
-    issueId,
-    aiReviewResult,
-    differencesFound,
-  });
+      if (!writerRes.ok) {
+        const err = await writerRes.text();
+        return NextResponse.json({ error: `Writer API error: ${err}` }, { status: writerRes.status });
+      }
+
+      const writerData = await writerRes.json();
+      result = JSON.parse(writerData.choices[0].message.content);
+    }
+
+    const coldReadResult =
+      result ??
+      unableToReviewResult('No readable proof text was provided to the Editorial Cold Read webhook.');
+    const reviewComment = buildColdReadComment(coldReadResult, documentName);
+    const proofHqResult: { posted: boolean; status?: number; error?: string } = { posted: false };
+
+    if (proofToken) {
+      try {
+        const posted = await postProofComment(proofToken, reviewComment);
+        proofHqResult.posted = posted.ok;
+        proofHqResult.status = posted.status;
+        if (!posted.ok) {
+          proofHqResult.error = 'ProofHQ comment POST failed.';
+        }
+      } catch (err) {
+        proofHqResult.error = err instanceof Error ? err.message : 'ProofHQ request failed.';
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      documentId,
+      documentName,
+      proofTextSource: proofTextSource || undefined,
+      proofToken: proofToken || undefined,
+      proofHq: proofHqResult,
+      coldRead: coldReadResult,
+      comment: reviewComment,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Editorial Cold Read webhook failed.';
+    return NextResponse.json(
+      {
+        success: false,
+        error: message,
+      },
+      { status: 500 }
+    );
+  }
 }
