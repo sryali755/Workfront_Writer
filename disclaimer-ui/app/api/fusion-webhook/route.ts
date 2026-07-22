@@ -7,6 +7,7 @@ export const config = {
 export const runtime = 'nodejs';
 import { postProofComment, findProofByName } from '../../lib/proofhq';
 import { getProofTextByDocumentId } from '../../lib/get-proof-text';
+import mappingData from '../../lib/document-proof-mapping.json';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
 const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com';
@@ -426,25 +427,24 @@ export async function POST(req: NextRequest) {
       result ??
       unableToReviewResult('No readable proof text was provided to the Editorial Cold Read webhook.');
     const reviewComment = buildColdReadComment(coldReadResult, documentName);
-    const proofHqResult: { posted: boolean; status?: number; error?: string; proofName?: string } = { posted: false };
+    const proofHqResult: { posted: boolean; status?: number; error?: string; proofId?: string } = { posted: false };
 
-    // Try to post to ProofHQ by matching document name to proof name
+    // Try to post to ProofHQ using document name mapping
     if (documentName && !proofToken) {
       try {
-        console.log('Searching ProofHQ for proof by name:', documentName);
-        const proof = await findProofByName(documentName);
-        if (proof) {
-          console.log('Found proof in ProofHQ:', proof.id, proof.name);
-          proofHqResult.proofName = proof.name;
-          const posted = await postProofComment(proof.id, reviewComment);
+        const mapping = mappingData.mappings.find((m) => m.documentName === documentName);
+        if (mapping && mapping.proofId) {
+          console.log('Found proof mapping:', { documentName, proofId: mapping.proofId });
+          proofHqResult.proofId = mapping.proofId;
+          const posted = await postProofComment(mapping.proofId, reviewComment);
           proofHqResult.posted = posted.ok;
           proofHqResult.status = posted.status;
           if (!posted.ok) {
             proofHqResult.error = 'ProofHQ comment POST failed.';
           }
         } else {
-          console.log('No proof found in ProofHQ matching name:', documentName);
-          proofHqResult.error = `No proof found in ProofHQ with name: ${documentName}`;
+          console.log('No proof mapping found for document:', documentName);
+          proofHqResult.error = `No proof mapping found for: ${documentName}`;
         }
       } catch (err) {
         proofHqResult.error = err instanceof Error ? err.message : 'ProofHQ request failed.';
