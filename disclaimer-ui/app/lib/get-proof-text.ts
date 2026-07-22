@@ -1,20 +1,12 @@
 import mappingData from './document-proof-mapping.json';
 
-export interface ProofMapping {
-  documentId?: string;
-  documentName?: string;
-  proofText?: string;
-  proofToken?: string;
-  proofId?: string;
-}
-
-export function getProofTextByDocumentId(documentId: string): ProofMapping | null {
-  const mapping = mappingData.mappings.find((m: any) => m.documentId === documentId);
-  return mapping || null;
+export function getProofTextByDocumentId(documentId: string): { proofText: string; proofToken: string } | null {
+  const mapping = (mappingData.mappings as any[]).find((m) => m.documentId === documentId);
+  return mapping ? { proofText: mapping.proofText, proofToken: mapping.proofToken } : null;
 }
 
 export function getProofIdByDocumentName(documentName: string): string | null {
-  const mapping = mappingData.mappings.find((m: any) => m.documentName === documentName);
+  const mapping = (mappingData.mappings as any[]).find((m) => m.documentName === documentName);
   return mapping?.proofId || null;
 }
 
