@@ -1,11 +1,17 @@
 {
   "mappings": [
     {
+      "documentId": "placeholder",
       "documentName": "45_RTL25_956050_DTR_8.5x5.5_Fly_DS_General_Awareness_M4",
+      "proofText": "",
+      "proofToken": "",
       "proofId": "160463093"
     },
     {
+      "documentId": "placeholder",
       "documentName": "1_RTL26_1064850_IR_Product_BRCH_3x9_0326_db_M6",
+      "proofText": "",
+      "proofToken": "",
       "proofId": ""
     }
   ]
