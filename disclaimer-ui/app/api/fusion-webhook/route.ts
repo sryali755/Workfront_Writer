@@ -331,18 +331,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (!isUsableProofText(proofText, documentName)) {
-      // If documentId looks like it wasn't mapped properly in Fusion
-      if (documentId?.includes?.('newState')) {
-        result = unableToReviewResult(
-          `ERROR: documentId in Fusion is not mapped correctly. It received the literal text "${documentId}" instead of an actual ID. Please fix the Fusion HTTP module mapping.`
-        );
-      } else if (documentId) {
-        result = unableToReviewResult(
-          `No proof text found for document ${documentId}. Add it to the mapping file at app/lib/document-proof-mapping.json`
-        );
-      } else {
-        result = unableToReviewResult('No documentId provided and no proofText in request.');
-      }
+      result = unableToReviewResult(
+        'No readable proof text was provided to the Editorial Cold Read webhook. Fusion must extract the PDF text and send it as proofText in the request body.'
+      );
     } else if (!result) {
       const writerRes = await fetch(WRITER_API_URL, {
         method: 'POST',
