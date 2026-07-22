@@ -5,8 +5,6 @@ export const config = {
 };
 
 export const runtime = 'nodejs';
-import { postProofComment } from '../../lib/proofhq';
-import { getProofIdByDocumentName } from '../../lib/get-proof-text';
 
 const WRITER_API_URL = 'https://api.writer.com/v1/chat';
 const WORKFRONT_BASE = 'https://comcastcorp.sb01.workfront.com';
@@ -420,51 +418,12 @@ export async function POST(req: NextRequest) {
       result ??
       unableToReviewResult('No readable proof text was provided to the Editorial Cold Read webhook.');
     const reviewComment = buildColdReadComment(coldReadResult, documentName);
-    const proofHqResult: { posted: boolean; status?: number; error?: string; proofId?: string } = { posted: false };
-
-    // Try to post to ProofHQ using document name mapping
-    if (documentName && !proofToken) {
-      try {
-        const proofId = getProofIdByDocumentName(documentName);
-        if (proofId) {
-          console.log('Found proof mapping:', { documentName, proofId });
-          proofHqResult.proofId = proofId;
-          const posted = await postProofComment(proofId, reviewComment);
-          proofHqResult.posted = posted.ok;
-          proofHqResult.status = posted.status;
-          if (!posted.ok) {
-            proofHqResult.error = 'ProofHQ comment POST failed.';
-          }
-        } else {
-          console.log('No proof mapping found for document:', documentName);
-          proofHqResult.error = `No proof mapping found for: ${documentName}`;
-        }
-      } catch (err) {
-        proofHqResult.error = err instanceof Error ? err.message : 'ProofHQ request failed.';
-      }
-    }
-
-    // If proofToken was provided directly, use it
-    if (proofToken) {
-      try {
-        const posted = await postProofComment(proofToken, reviewComment);
-        proofHqResult.posted = posted.ok;
-        proofHqResult.status = posted.status;
-        if (!posted.ok) {
-          proofHqResult.error = 'ProofHQ comment POST failed.';
-        }
-      } catch (err) {
-        proofHqResult.error = err instanceof Error ? err.message : 'ProofHQ request failed.';
-      }
-    }
 
     return NextResponse.json({
       success: true,
       documentId,
       documentName,
       proofTextSource: proofTextSource || undefined,
-      proofToken: proofToken || undefined,
-      proofHq: proofHqResult,
       coldRead: coldReadResult,
       comment: reviewComment,
     });
