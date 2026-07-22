@@ -429,12 +429,11 @@ export async function POST(req: NextRequest) {
     // Try to upload PDF to ProofHQ and post comment
     let proofCommentResult: { success: boolean; proofToken?: string; error?: string } = {
       success: false,
-      error: 'ProofHQ upload temporarily disabled - service account needs commenting permissions',
+      error: 'ProofHQ integration ready',
     };
 
-    // Temporarily skip ProofHQ upload while we resolve 400 error
-    // TODO: Fix form-data upload compatibility with ProofHQ API
-    if (false && (body.pdfFile || body.pdfDownloadUrl)) {
+    // ProofHQ upload and comment posting enabled
+    if (body.pdfFile || body.pdfDownloadUrl) {
       try {
         // Get PDF buffer
         let pdfBuffer: Buffer | undefined;
