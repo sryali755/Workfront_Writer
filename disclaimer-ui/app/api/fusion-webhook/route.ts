@@ -360,18 +360,23 @@ export async function POST(req: NextRequest) {
         proofText = await extractPdfText(pdfBuffer);
         proofTextSource = 'pdf-download-url';
       } catch (err) {
-        console.error('Failed to download/extract PDF from URL:', err);
+        console.error('Failed to download/extract PDF from URL:', err instanceof Error ? err.message : err);
       }
     }
 
-    // Fallback: try to look it up by documentId in mapping
+    // If no proofText in request, try to fetch document by documentId
     if (!isUsableProofText(proofText, documentName) && documentId) {
-      const mapping = getProofTextByDocumentId(documentId);
-      if (mapping) {
-        proofText = mapping.proofText;
-        proofTextSource = 'mapping-database';
+      try {
+        console.log('Attempting to fetch document by ID:', documentId);
+        const wfDoc = await fetchProofTextFromWorkfront(documentId);
+        proofText = wfDoc.text;
+        proofTextSource = 'workfront-fetch';
+        if (!documentName) documentName = wfDoc.documentName;
+      } catch (err) {
+        console.error('Failed to fetch document from Workfront:', err instanceof Error ? err.message : err);
       }
     }
+
 
     if (!isUsableProofText(proofText, documentName)) {
       result = unableToReviewResult(
