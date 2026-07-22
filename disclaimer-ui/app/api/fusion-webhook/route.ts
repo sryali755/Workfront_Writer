@@ -372,13 +372,18 @@ export async function POST(req: NextRequest) {
     // If no proofText in request, try to fetch document by documentId
     if (!isUsableProofText(proofText, documentName) && documentId) {
       try {
-        console.log('Attempting to fetch document by ID:', documentId);
+        console.log('==== FETCH DOCUMENT START ====');
+        console.log('documentId:', documentId);
+        console.log('documentName:', documentName);
         const wfDoc = await fetchProofTextFromWorkfront(documentId);
+        console.log('==== FETCH DOCUMENT SUCCESS ====');
         proofText = wfDoc.text;
         proofTextSource = 'workfront-fetch';
         if (!documentName) documentName = wfDoc.documentName;
       } catch (err) {
-        console.error('Failed to fetch document from Workfront:', err instanceof Error ? err.message : err);
+        console.error('==== FETCH DOCUMENT FAILED ====');
+        console.error('Error:', err instanceof Error ? err.message : err);
+        console.error('documentId was:', documentId);
       }
     }
 
